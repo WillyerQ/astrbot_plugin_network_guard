@@ -196,7 +196,6 @@ class NetworkGuardPlugin(Star):
     async def _check_new(self):
         """对比检查新设备"""
         current = _read_arp()
-        _save_devices(current)
         old = _load_devices()
         old_macs = {d["mac"] for d in old}
         whitelist = _get_whitelist()
@@ -221,6 +220,9 @@ class NetworkGuardPlugin(Star):
                 )
             except Exception as e:
                 logger.error(f"[NetworkGuard] 通知失败: {e}")
+        # 保存当前设备列表用于下次对比
+        if current:
+            _save_devices(current)
 
     # ========== 指令处理 ==========
 
