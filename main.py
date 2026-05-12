@@ -156,7 +156,7 @@ def _ssh_cmd(cmd: str, timeout: int = 15) -> str:
         r = subprocess.run(
             ["sshpass", "-p", _get_cfg("ssh_password", "tommy12345"),
              "ssh", "-o", "StrictHostKeyChecking=no", "-o", "ConnectTimeout=10",
-             f"root@{_get_cfg('ssh_host', '192.168.31.42')}", cmd],
+             f_get_cfg("ssh_user", "root") + "@" + _get_cfg("ssh_host", "192.168.31.42"), cmd],
             capture_output=True, timeout=timeout
         )
         return r.stdout.decode("utf-8", errors="ignore")
@@ -362,7 +362,7 @@ class NetworkGuardPlugin(Star):
                 # SSH 执行共享卷上的脚本（后台运行）
                 proc = await asyncio.create_subprocess_exec(
                     "sshpass", "-p", pw, "ssh", "-o", "StrictHostKeyChecking=no",
-                    "-o", "ConnectTimeout=10", "root@" + host,
+                    "-o", "ConnectTimeout=10", _get_cfg("ssh_user", "root") + "@" + host,
                     "nohup bash " + sh_path + " > /dev/null 2>&1 &",
                     stdout=asyncio.subprocess.DEVNULL,
                     stderr=asyncio.subprocess.DEVNULL

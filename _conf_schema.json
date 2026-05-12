@@ -38,5 +38,11 @@
     "type": "list",
     "default": [],
     "hint": "如 aa:bb:cc:dd:ee:ff:我的电脑"
+  },
+  "ssh_user": {
+    "description": "SSH 用户名",
+    "type": "string",
+    "default": "root",
+    "hint": "宿主机 SSH 登录用户名"
   }
 }
