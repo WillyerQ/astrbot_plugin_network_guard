@@ -1,0 +1,36 @@
+{
+  "ssh_host": {
+    "description": "宿主机 IP",
+    "type": "string",
+    "default": "192.168.31.42",
+    "hint": "用于 ARP 攻击时 SSH 到宿主机"
+  },
+  "ssh_password": {
+    "description": "宿主机 SSH 密码",
+    "type": "string",
+    "default": "",
+    "hint": "用于 ARP 攻击，如果留空则攻击功能不可用"
+  },
+  "subnet": {
+    "description": "局域网网段",
+    "type": "string",
+    "default": "192.168.31.0/24",
+    "hint": "用于计算网关地址"
+  },
+  "scan_interval": {
+    "description": "自动扫描间隔（分钟）",
+    "type": "int",
+    "default": 10
+  },
+  "notify_on_new": {
+    "description": "新设备通知",
+    "type": "bool",
+    "default": true
+  },
+  "known_devices": {
+    "description": "白名单（MAC:名称）",
+    "type": "list",
+    "default": [],
+    "hint": "如 aa:bb:cc:dd:ee:ff:我的电脑"
+  }
+}
