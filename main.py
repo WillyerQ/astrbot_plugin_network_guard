@@ -382,22 +382,28 @@ print(f"Done: {cnt}")
         pw = _get_cfg("ssh_password", "tommy12345")
 
         try:
+            import os as _os
+            host = _get_cfg("ssh_host", "192.168.31.42")
+            pw = _get_cfg("ssh_password", "tommy12345")
             if _IN_DOCKER:
-                # Docker 模式：SCP 到宿主机再执行
-                _sp.run(["sshpass","-p",pw,"scp","-o","StrictHostKeyChecking=no",
-                        script_path, f"root@{host}:/tmp/arp_attack_run.py"],
-                       capture_output=True, timeout=10)
-                r = _sp.run(["sshpass","-p",pw,"ssh","-o","StrictHostKeyChecking=no",
-                            "-o","ConnectTimeout=10",f"root@{host}",
-                            "python3 /tmp/arp_attack_run.py"],
-                           capture_output=True, timeout=duration+15)
+                # Docker 模式：用 _ssh_cmd 执行（复用已有的函数）
+                result = _ssh_cmd(f"python3 /tmp/arp_attack_run.py", duration + 15)
             else:
-                # 非 Docker 模式：本地直接执行
-                import os as _os
-                _sp.run(["python3", script_path], capture_output=True, timeout=duration+15)
-            logger.info(f"[NetworkGuard] ARP攻击完成")
+                # 非 Docker：本地执行
+                subprocess.run(["python3", script_path], capture_output=True, timeout=duration+15)
+                result = "OK"
+            logger.info(f"[NetworkGuard] ARP攻击: {result.strip()[:100] if result else '无输出'}")
         except Exception as e:
-            logger.error(f"[NetworkGuard] ARP攻击失败: {e}")
+            import traceback
+            logger.error(f"[NetworkGuard] ARP攻击失败: {e}\\n{traceback.format_exc()[:200]}")
+            # 改为写文件方式（宿主机 cron 自动检测执行）
+            try:
+                import shutil as _sh
+                _sh.copy2(script_path, "/AstrBot/data/arp_attack_ready.py")
+                _os.chmod("/AstrBot/data/arp_attack_ready.py", 0o755)
+                logger.info("[NetworkGuard] 攻击脚本已写入 /AstrBot/data/arp_attack_ready.py，请在宿主机手动执行")
+            except:
+                pass
 
 
 
