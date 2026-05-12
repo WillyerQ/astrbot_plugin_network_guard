@@ -196,6 +196,7 @@ class NetworkGuardPlugin(Star):
     async def _check_new(self):
         """对比检查新设备"""
         current = _read_arp()
+        _save_devices(current)
         old = _load_devices()
         old_macs = {d["mac"] for d in old}
         whitelist = _get_whitelist()
@@ -214,7 +215,7 @@ class NetworkGuardPlugin(Star):
             try:
                 asyncio.create_task(
                     self.context.send_message(
-                        _get_cfg("notify_session", "93E7D4D47A13E3621185AB98B8B3420B"),
+                        _get_cfg("notify_session", "野生t:FriendMessage:814487409"),
                         "\n".join(msgs)
                     )
                 )
