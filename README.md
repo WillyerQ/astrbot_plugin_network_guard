@@ -91,6 +91,7 @@ echo '*/1 * * * * ip neigh show | grep eno1-ovs | grep lladdr | grep -iv fe80 | 
 
 | 配置项 | 默认值 | 说明 |
 |--------|--------|------|
+| `notify_session` | `93E7D4D47A1...` | 通知推送的目标会话 ID |
 | `scan_interval` | `10` | 自动扫描间隔（分钟） |
 | `notify_on_new` | `true` | 发现新设备时是否通知 |
 | `known_devices` | `[]` | 白名单 MAC 地址列表（格式: `aa:bb:cc:dd:ee:ff:名称`） |

@@ -122,7 +122,7 @@ def _ssh_cmd(cmd: str, timeout: int = 15) -> str:
         return ""
 
 
-@register("network_guard", "AstrBot", "内网设备监控守卫", "1.0.3")
+@register("network_guard", "AstrBot", "内网设备监控守卫", "1.1.0")
 class NetworkGuardPlugin(Star):
     def __init__(self, context: Context, config: dict = None):
         super().__init__(context)
@@ -171,7 +171,7 @@ class NetworkGuardPlugin(Star):
             try:
                 asyncio.create_task(
                     self.context.send_message(
-                        "93E7D4D47A13E3621185AB98B8B3420B",
+                        _get_cfg("notify_session", "93E7D4D47A13E3621185AB98B8B3420B"),
                         "\n".join(msgs)
                     )
                 )
