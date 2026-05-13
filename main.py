@@ -8,6 +8,8 @@ from datetime import datetime
 from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, register
 from astrbot.api import logger
+from astrbot.api.message_components import Plain
+from astrbot.api.event import MessageChain
 from astrbot.core.star.filter.event_message_type import EventMessageType
 
 import os as _os
@@ -194,6 +196,7 @@ class NetworkGuardPlugin(Star):
                 await asyncio.sleep(60)
 
     async def _check_new(self):
+        logger.info("[NetworkGuard] 执行 _check_new")
         """对比检查新设备"""
         current = _read_arp()
         old = _load_devices()
@@ -215,7 +218,7 @@ class NetworkGuardPlugin(Star):
                 asyncio.create_task(
                     self.context.send_message(
                         _get_cfg("notify_session", "野生t:FriendMessage:814487409"),
-                        "\n".join(msgs)
+                        MessageChain([Plain("\n".join(msgs))])
                     )
                 )
             except Exception as e:
@@ -321,6 +324,23 @@ class NetworkGuardPlugin(Star):
             return
 
         # 守卫帮助
+        # 守卫测试通知
+        if msg == "守卫测试通知":
+            session = _get_cfg("notify_session", "野生t:FriendMessage:814487409")
+            logger.info(f"[NetworkGuard] 测试通知: session={session}")
+            try:
+                from astrbot.core.platform.message_session import MessageSession
+                sess = MessageSession.from_str(session)
+                logger.info(f"[NetworkGuard] 解析后: platform={sess.platform_name}, type={sess.message_type}, id={sess.session_id}")
+                result = await self.context.send_message(session, "🧪 守卫通知测试")
+                logger.info(f"[NetworkGuard] send_message结果: {result}")
+                yield event.plain_result(f"✅ 已发送 (返回: {result})")
+            except Exception as e:
+                import traceback
+                logger.error(f"[NetworkGuard] 发送失败: {e}\n{traceback.format_exc()}")
+                yield event.plain_result(f"❌ {e}")
+            return
+
         if msg == "守卫帮助":
             yield event.plain_result(
                 "\U0001f4e1 内网监控守卫\n\n"
