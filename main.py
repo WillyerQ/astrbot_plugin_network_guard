@@ -338,25 +338,31 @@ class NetworkGuardPlugin(Star):
             return
 
 
-        # 守卫备注 <IP> <名称>
+        # 守卫备注 <IP或MAC> <名称>
         if msg.startswith("守卫备注"):
             parts = msg.split(maxsplit=2)
             if len(parts) < 3:
-                yield event.plain_result("用法: 守卫备注 <IP地址> <设备名称>")
+                yield event.plain_result("用法: 守卫备注 <IP地址或MAC地址> <设备名称>")
                 return
-            ip = parts[1].strip()
+            id_str = parts[1].strip()
             name = parts[2].strip()
-            devices = _read_arp()
-            matched = [d for d in devices if d["ip"] == ip]
-            if not matched:
-                yield event.plain_result(f"❌ 未找到IP {ip}，请先 守卫扫描")
-                return
-            mac = matched[0]["mac"]
+            mac = ""
+            # 如果输入的是 MAC 地址，直接使用
+            if id_str.count(":") == 5:
+                mac = id_str.lower()
+            else:
+                # 输入的是 IP，查 ARP 表获取 MAC
+                devices = _read_arp()
+                matched = [d for d in devices if d["ip"] == id_str]
+                if not matched:
+                    yield event.plain_result(f"❌ 未找到IP {id_str}，请先 守卫扫描 或直接输入MAC地址")
+                    return
+                mac = matched[0]["mac"]
             known = _get_cfg("known_devices", [])
             known = [k for k in known if not k.startswith(mac)]
             known.append(f"{mac}:{name}")
             _save_cfg({"known_devices": known})
-            yield event.plain_result(f"✅ 已备注 {ip} ({mac}) → {name}")
+            yield event.plain_result(f"✅ 已绑定 {mac} → {name}")
             return
 
 
