@@ -332,7 +332,7 @@ class NetworkGuardPlugin(Star):
                 from astrbot.core.platform.message_session import MessageSession
                 sess = MessageSession.from_str(session)
                 logger.info(f"[NetworkGuard] 解析后: platform={sess.platform_name}, type={sess.message_type}, id={sess.session_id}")
-                result = await self.context.send_message(session, "🧪 守卫通知测试")
+                result = await self.context.send_message(session, MessageChain([Plain("🧪 守卫通知测试")]))
                 logger.info(f"[NetworkGuard] send_message结果: {result}")
                 yield event.plain_result(f"✅ 已发送 (返回: {result})")
             except Exception as e:
