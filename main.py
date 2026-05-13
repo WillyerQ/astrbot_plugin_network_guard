@@ -227,7 +227,7 @@ class NetworkGuardPlugin(Star):
         old_macs = {d["mac"] for d in old}
         whitelist = _get_whitelist()
 
-        new_ones = [d for d in current if d["mac"] not in old_macs]
+        new_ones = [d for d in current if d["mac"] not in old_macs and d["mac"] not in whitelist]
         unknown = [d for d in current if d["mac"] not in whitelist and d["ip"] != "192.168.31.1"]
 
         msgs = []
