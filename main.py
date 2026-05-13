@@ -209,9 +209,6 @@ class NetworkGuardPlugin(Star):
         msgs = []
         for d in new_ones:
             msgs.append(f"🆕 新设备: {d['ip']} ({d['mac']})")
-        for d in unknown:
-            if d not in new_ones:
-                msgs.append(f"⚠️ 陌生设备: {d['ip']} ({d['mac']})")
 
         if msgs and _get_cfg("notify_on_new", True):
             try:
