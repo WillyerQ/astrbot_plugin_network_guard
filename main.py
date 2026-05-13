@@ -139,6 +139,18 @@ def _get_cfg(key: str, default=None):
     return _load_cfg().get(key, default)
 
 
+
+def _get_blacklist() -> set:
+    macs = set()
+    for entry in _get_cfg("blacklist", []):
+        if ":" in str(entry):
+            mac = entry.split(":")[0].strip().lower()
+            if mac.count(":") == 5:
+                macs.add(mac)
+    return macs
+
+
+_attack_tasks = {}  # mac -> asyncio.Task
 def _get_whitelist() -> set:
     """获取白名单 MAC 地址集合"""
     macs = set()
@@ -207,6 +219,22 @@ class NetworkGuardPlugin(Star):
         unknown = [d for d in current if d["mac"] not in whitelist and d["ip"] != "192.168.31.1"]
 
         msgs = []
+
+        # 检测黑名单设备
+        blacklist = _get_blacklist()
+        for d in current:
+            if d["mac"] in blacklist and d["mac"] not in _attack_tasks:
+                logger.warning(f"[NetworkGuard] 黑名单设备上线: {d['ip']} ({d['mac']})")
+                gw = _get_cfg("subnet", "192.168.31.0/24").rsplit(".", 1)[0] + ".1"
+                _attack_tasks[d["mac"]] = asyncio.create_task(self._continuous_attack(d["ip"], gw, d["mac"]))
+                msgs.append(f"⛔ 黑名单设备上线，已自动攻击: {d['ip']} ({d['mac']})")
+        # 清理已离线的黑名单任务
+        current_macs = {d["mac"] for d in current}
+        for mac in list(_attack_tasks.keys()):
+            if mac not in current_macs:
+                _attack_tasks[mac].cancel()
+                del _attack_tasks[mac]
+                logger.info(f"[NetworkGuard] 黑名单设备已离线: {mac}")
         for d in new_ones:
             msgs.append(f"🆕 新设备: {d['ip']} ({d['mac']})")
 

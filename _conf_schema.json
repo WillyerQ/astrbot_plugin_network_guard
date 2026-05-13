@@ -44,5 +44,11 @@
     "type": "string",
     "default": "root",
     "hint": "宿主机 SSH 登录用户名"
+  },
+  "blacklist": {
+    "description": "黑名单（MAC地址列表）",
+    "type": "list",
+    "default": [],
+    "hint": "黑名单设备上线后自动ARP攻击断网"
   }
 }
