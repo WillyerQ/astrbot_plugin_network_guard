@@ -156,10 +156,10 @@ def _get_whitelist_name() -> dict:
     result = {}
     for entry in _get_cfg("known_devices", []):
         if ":" in str(entry):
-            parts = entry.split(":", 1)
-            mac = parts[0].strip().lower()
+            mac, name = entry.rsplit(":", 1)
+            mac = mac.strip().lower()
             if mac.count(":") == 5:
-                result[mac] = parts[1].strip() if len(parts) > 1 else ""
+                result[mac] = name.strip()
     return result
 
 
