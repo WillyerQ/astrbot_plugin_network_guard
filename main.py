@@ -151,6 +151,18 @@ def _get_blacklist() -> set:
 
 
 _attack_tasks = {}  # mac -> asyncio.Task
+def _get_whitelist_name() -> dict:
+    """获取白名单 MAC -> 名称 映射"""
+    result = {}
+    for entry in _get_cfg("known_devices", []):
+        if ":" in str(entry):
+            parts = entry.split(":", 1)
+            mac = parts[0].strip().lower()
+            if mac.count(":") == 5:
+                result[mac] = parts[1].strip() if len(parts) > 1 else ""
+    return result
+
+
 def _get_whitelist() -> set:
     """获取白名单 MAC 地址集合"""
     macs = set()
@@ -281,11 +293,13 @@ class NetworkGuardPlugin(Star):
             if not devices:
                 yield event.plain_result("\U0001f4ed 暂无记录，请先发送 守卫扫描")
                 return
-            wl = _get_whitelist()
+            wl = _get_whitelist_name()
             lines = [f"\U0001f4cb 已记录 ({len(devices)} 台)"]
             for d in devices:
-                tag = " \u2705" if d["mac"] in wl else ""
-                lines.append(f"{tag} {d['ip']}  {d['mac']}")
+                name = wl.get(d["mac"], "")
+                tag = " \u2705" if name else ""
+                name_tag = f" ({name})" if name else ""
+                lines.append(f"{d['ip']}  {d['mac']}{name_tag}")
             yield event.plain_result("\n".join(lines[:30]))
             return
 
