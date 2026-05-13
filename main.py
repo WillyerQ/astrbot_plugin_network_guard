@@ -309,6 +309,29 @@ class NetworkGuardPlugin(Star):
             yield event.plain_result(f"\u2705 攻击任务已启动，{dur} 秒后恢复")
             return
 
+
+        # 守卫备注 <IP> <名称>
+        if msg.startswith("守卫备注"):
+            parts = msg.split(maxsplit=2)
+            if len(parts) < 3:
+                yield event.plain_result("用法: 守卫备注 <IP地址> <设备名称>")
+                return
+            ip = parts[1].strip()
+            name = parts[2].strip()
+            devices = _read_arp()
+            matched = [d for d in devices if d["ip"] == ip]
+            if not matched:
+                yield event.plain_result(f"❌ 未找到IP {ip}，请先 守卫扫描")
+                return
+            mac = matched[0]["mac"]
+            known = _get_cfg("known_devices", [])
+            known = [k for k in known if not k.startswith(mac)]
+            known.append(f"{mac}:{name}")
+            _save_cfg({"known_devices": known})
+            yield event.plain_result(f"✅ 已备注 {ip} ({mac}) → {name}")
+            return
+
+
         # 守卫停止 <IP>
         if msg.startswith("守卫停止"):
             parts = msg.split()
