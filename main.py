@@ -391,6 +391,21 @@ class NetworkGuardPlugin(Star):
             yield event.plain_result(f"\u2705 已尝试恢复 {ip}")
             return
 
+        # 守卫通知 开/关
+        if msg == "守卫通知关":
+            _save_cfg({"notify_on_new": False})
+            yield event.plain_result("🔕 新设备通知已关闭")
+            return
+        if msg == "守卫通知开":
+            _save_cfg({"notify_on_new": True})
+            yield event.plain_result("🔔 新设备通知已开启")
+            return
+        if msg == "守卫通知":
+            status = "🔔 开启" if _get_cfg("notify_on_new", True) else "🔕 关闭"
+            yield event.plain_result(f"新设备通知状态: {status}\n发送 守卫通知开/关 来切换")
+            return
+
+
         # 守卫帮助
         # 守卫测试通知
         if msg == "守卫测试通知":
