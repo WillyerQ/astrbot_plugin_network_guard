@@ -223,11 +223,15 @@ class NetworkGuardPlugin(Star):
         logger.info("[NetworkGuard] 执行 _check_new")
         """对比检查新设备"""
         current = _read_arp()
-        old = _load_devices()
-        old_macs = {d["mac"] for d in old}
         whitelist = _get_whitelist()
+        # 读取永久 MAC 记录（见过的设备永不重复通知）
+        seen_file = os.path.join(_PLUGIN_DIR, "seen_macs.txt")
+        seen_macs = set()
+        if os.path.exists(seen_file):
+            with open(seen_file) as f:
+                seen_macs = {line.strip() for line in f if line.strip()}
 
-        new_ones = [d for d in current if d["mac"] not in old_macs and d["mac"] not in whitelist]
+        new_ones = [d for d in current if d["mac"] not in seen_macs and d["mac"] not in whitelist]
         unknown = [d for d in current if d["mac"] not in whitelist and d["ip"] != "192.168.31.1"]
 
         msgs = []
@@ -260,8 +264,20 @@ class NetworkGuardPlugin(Star):
                 )
             except Exception as e:
                 logger.error(f"[NetworkGuard] 通知失败: {e}")
-        # 保存当前设备列表用于下次对比
+        # 记录所有见过的 MAC（永久保存，不再重复通知）
         if current:
+            seen_file = os.path.join(_PLUGIN_DIR, "seen_macs.txt")
+            current_macs = {d["mac"] for d in current}
+            try:
+                existing = set()
+                if os.path.exists(seen_file):
+                    with open(seen_file) as f:
+                        existing = {line.strip() for line in f if line.strip()}
+                existing.update(current_macs)
+                with open(seen_file, "w") as f:
+                    f.write("\n".join(sorted(existing)))
+            except Exception as e:
+                logger.error(f"[NetworkGuard] 保存MAC记录失败: {e}")
             _save_devices(current)
 
     # ========== 指令处理 ==========
